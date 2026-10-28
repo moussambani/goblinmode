@@ -33,6 +33,13 @@ struct ChordonBleh : Module {
 	enum LightId {
 		LIGHTS_LEN
 	};
+	enum StrumMode {
+		STRUM_UP,
+		STRUM_DOWN,
+		STRUM_UP_DOWN,
+		STRUM_RANDOM,
+		NUM_STRUM_MODES
+	};
 
 	Chord chord;
 	int lastState[5] = {};
@@ -41,6 +48,10 @@ struct ChordonBleh : Module {
 	int lastSettings[6] = {};
 	bool lastGate = false;
 	float strumTime = 0.f;	// seconds since the last gate rising edge
+	int strumMode = STRUM_UP;
+	// Per channel, set on each gate rising edge: the strum step it opens on, and the step it re-opens on (-1 for none)
+	int strumSlot[5] = {0, 1, 2, 3, 4};
+	int strumRetrigger[5] = {-1, -1, -1, -1, -1};
 	float settingTimer = 0.f;
 	bool clearPending = false;
 
@@ -89,6 +100,37 @@ struct ChordonBleh : Module {
 		if (inputs[inputId].isConnected())
 			v += inputs[inputId].getVoltage() * (pq->maxValue - pq->minValue) / 10.f;
 		return clamp((int) std::round(v), (int) pq->minValue, (int) pq->maxValue);
+	}
+
+	void startStrum(int count) {
+		for (int i = 0; i < 5; i++) {
+			strumSlot[i] = i;
+			strumRetrigger[i] = -1;
+		}
+		if (strumMode == STRUM_DOWN) {
+			for (int i = 0; i < count; i++)
+				strumSlot[i] = count - 1 - i;
+		}
+		else if (strumMode == STRUM_UP_DOWN) {
+			for (int i = 0; i < count - 1; i++)
+				strumRetrigger[i] = 2 * count - 2 - i;
+		}
+		else if (strumMode == STRUM_RANDOM) {
+			for (int i = count - 1; i > 0; i--)
+				std::swap(strumSlot[i], strumSlot[random::u32() % (i + 1)]);
+		}
+	}
+
+	json_t* dataToJson() override {
+		json_t* rootJ = json_object();
+		json_object_set_new(rootJ, "strumMode", json_integer(strumMode));
+		return rootJ;
+	}
+
+	void dataFromJson(json_t* rootJ) override {
+		json_t* modeJ = json_object_get(rootJ, "strumMode");
+		if (modeJ)
+			strumMode = clamp((int) json_integer_value(modeJ), 0, NUM_STRUM_MODES - 1);
 	}
 
 	void showSetting(int which, int value) {
@@ -141,8 +183,10 @@ struct ChordonBleh : Module {
 		// A changed setting is shown until the next note, but for at least 2 seconds
 		int settings[6] = {tonic, key, state[3], state[4], octave, (int) std::round(strumMs)};
 		bool noteEvent = (gate && !lastGate) || keyNote.semitone != lastState[0];
-		if (gate && !lastGate)
+		if (gate && !lastGate) {
 			strumTime = 0.f;
+			startStrum(chord.count);
+		}
 		lastGate = gate;
 		if (built) {
 			int changed = 0;
@@ -176,7 +220,14 @@ struct ChordonBleh : Module {
 		outputs[GATE_OUTPUT].setChannels(chord.count);
 		for (int i = 0; i < chord.count; i++) {
 			outputs[CHORD_OUTPUT].setVoltage(chord.notes[i] / 12.f, i);
-			outputs[GATE_OUTPUT].setVoltage(gate && strumTime >= i * strumDelay ? 10.f : 0.f, i);
+			bool open = gate && strumTime >= strumSlot[i] * strumDelay;
+			// Re-opening needs the gate to drop first; below 2 ms the gap does not fit between steps
+			if (strumRetrigger[i] >= 0 && strumDelay >= 0.002f) {
+				float t = strumTime - strumRetrigger[i] * strumDelay;
+				if (t >= 0.f && t < 0.001f)
+					open = false;
+			}
+			outputs[GATE_OUTPUT].setVoltage(open ? 10.f : 0.f, i);
 		}
 	}
 };
@@ -252,6 +303,18 @@ struct ChordonBlehWidget : ModuleWidget {
 		label->fontSize = fontSize;
 		label->box.pos = mm2px(posMm);
 		addChild(label);
+	}
+
+	void appendContextMenu(Menu* menu) override {
+		ChordonBleh* module = dynamic_cast<ChordonBleh*>(this->module);
+		if (!module)
+			return;
+		menu->addChild(new MenuSeparator);
+		menu->addChild(createIndexSubmenuItem("Strum direction",
+			{"Up", "Down", "Up & down", "Random"},
+			[=]() { return (size_t) module->strumMode; },
+			[=](size_t mode) { module->strumMode = (int) mode; }
+		));
 	}
 
 	ChordonBlehWidget(ChordonBleh* module) {
