@@ -36,11 +36,17 @@ struct ChordonBleh : Module {
 	int lastState[5] = {};
 	int lastOctave = 0;
 	bool built = false;
+	int lastSettings[5] = {};
+	bool lastGate = false;
+	float settingTimer = 0.f;
+	bool clearPending = false;
 
 	// Read by the display widget
 	int dispPitchClass = 0;
 	const char* dispSuffix = "";
 	int dispInversion = 0;
+	int dispSetting = -1;	// index into SETTING_LABELS of the setting shown instead of the chord, or -1
+	char dispSettingText[32] = "";
 
 	ChordonBleh() {
 		config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -80,6 +86,21 @@ struct ChordonBleh : Module {
 		return clamp((int) std::round(v), (int) pq->minValue, (int) pq->maxValue);
 	}
 
+	void showSetting(int which, int value) {
+		static const char* const SETTING_LABELS[5] = {"Tonic", "Key", "Chord", "Inv", "Oct"};
+		if (which == 0)
+			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %s", SETTING_LABELS[which], NOTE_NAMES[value]);
+		else if (which == 1)
+			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %s", SETTING_LABELS[which], SCALE_NAMES[value]);
+		else if (which == 2)
+			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %s", SETTING_LABELS[which], CHORDS[value].name);
+		else
+			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %d", SETTING_LABELS[which], value);
+		dispSetting = which;
+		settingTimer = 2.f;
+		clearPending = false;
+	}
+
 	void process(const ProcessArgs& args) override {
 		int tonic = (int) std::round(params[TONIC_PARAM].getValue());
 		if (inputs[TONIC_INPUT].isConnected())
@@ -102,6 +123,27 @@ struct ChordonBleh : Module {
 			stepped(INVERSION_PARAM, INVERSION_INPUT),
 		};
 		int octave = stepped(OCTAVE_PARAM, OCTAVE_INPUT);
+		bool gate = !inputs[GATE_INPUT].isConnected() || inputs[GATE_INPUT].getVoltage() >= 1.f;
+
+		// A changed setting is shown until the next note, but for at least 2 seconds
+		int settings[5] = {tonic, key, state[3], state[4], octave};
+		bool noteEvent = (gate && !lastGate) || keyNote.semitone != lastState[0];
+		lastGate = gate;
+		if (built) {
+			int changed = 0;
+			while (changed < 5 && settings[changed] == lastSettings[changed])
+				changed++;
+			if (changed < 5)
+				showSetting(changed, settings[changed]);
+			else if (noteEvent && dispSetting >= 0)
+				clearPending = true;
+		}
+		std::copy(settings, settings + 5, lastSettings);
+		if (clearPending && settingTimer <= 0.f) {
+			dispSetting = -1;
+			clearPending = false;
+		}
+		settingTimer -= args.sampleTime;
 
 		if (!built || !std::equal(state, state + 5, lastState) || octave != lastOctave) {
 			std::copy(state, state + 5, lastState);
@@ -112,8 +154,6 @@ struct ChordonBleh : Module {
 			dispSuffix = chord.suffix;
 			dispInversion = state[4];
 		}
-
-		bool gate = !inputs[GATE_INPUT].isConnected() || inputs[GATE_INPUT].getVoltage() >= 1.f;
 
 		outputs[CHORD_OUTPUT].setChannels(chord.count);
 		outputs[GATE_OUTPUT].setChannels(chord.count);
@@ -144,11 +184,13 @@ struct ChordDisplay : TransparentWidget {
 	void drawLayer(const DrawArgs& args, int layer) override {
 		if (layer == 1) {
 			char text[32];
-			if (module)
+			if (module && module->dispSetting >= 0)
+				std::snprintf(text, sizeof(text), "%s", module->dispSettingText);
+			else if (module)
 				std::snprintf(text, sizeof(text), "%s%s", NOTE_NAMES[module->dispPitchClass], module->dispSuffix);
 			else
 				std::snprintf(text, sizeof(text), "Cmaj7");
-			if (module && module->dispInversion != 0) {
+			if (module && module->dispSetting < 0 && module->dispInversion != 0) {
 				size_t n = std::strlen(text);
 				std::snprintf(text + n, sizeof(text) - n, "/%d", module->dispInversion);
 			}
@@ -156,7 +198,8 @@ struct ChordDisplay : TransparentWidget {
 			std::shared_ptr<window::Font> font = loadPanelFont();
 			if (font) {
 				nvgFontFaceId(args.vg, font->handle);
-				nvgFontSize(args.vg, 22.f);
+				// Long readouts such as "Chord: Diminished 7" shrink to fit the display
+				nvgFontSize(args.vg, std::min(22.f, box.size.x * 0.95f / (std::strlen(text) * 0.55f)));
 				nvgFillColor(args.vg, nvgRGB(0xff, 0xb0, 0x30));
 				nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
 				nvgText(args.vg, box.size.x / 2.f, box.size.y / 2.f, text, NULL);
