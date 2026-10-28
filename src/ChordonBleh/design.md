@@ -37,12 +37,12 @@ Chord types: Auto, Major, Minor, Diminished, Augmented, Sus2, Sus4, Major 7, Min
 - **Auto chord quality.** `Auto` builds the diatonic triad for the quantized note by stacking thirds from the scale (in C major: C, Dm, Em, F, G, Am, Bdim). The suffix is looked up from the chord table. Explicit chord types ignore the scale for quality and are built on the quantized note as their root.
 - **Auto is triads only.** It never produces diatonic 7ths.
 - **Rounding tolerance.** The note voltage is floored after adding 1e-3 semitones, so exact semitone voltages are not pushed to the note below by float error. Slightly flat pitches still round down.
-- **Inversion.** Moves the lowest note up an octave, repeated per step, keeping the notes sorted.
+- **Inversion.** Range -5 to 5, default 0, CV -5 to 5 V (1 V per step). Positive steps move the lowest note up an octave, negative steps move the highest note down an octave, keeping the notes sorted. Steps beyond the chord size continue into the next octave rather than clamping.
 - **Gate.** Polyphonic, one channel per chord note, 10 V while `GATE IN` is at or above 1 V. It is held high when `GATE IN` is unpatched.
 - **No root output.** A mono root output existed in an earlier version and was removed.
 - **Naming.** The key-tonic knob is called TONIC so it is not confused with the chord root.
 - **Chord recomputation.** The chord is rebuilt only when a quantized input changes, not every sample, and the audio path does not allocate.
-- **Chord display.** A small display shows the chord name, such as `Cmaj7` or `Dm/1` (inversion after the slash).
+- **Chord display.** A small display shows the chord name, such as `Cmaj7` or `Dm/1` or `Dm/-1` (inversion after the slash, hidden at 0).
 - **Panel labels are drawn in code.** Rack does not render `<text>` in panel SVGs, so labels are drawn by the widget. The SVG is a plain 10HP (50.8 mm) dark background.
 
 ## Code layout

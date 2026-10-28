@@ -76,7 +76,8 @@ inline KeyNote quantizeToKey(int note, int tonic, int scale) {
 }
 
 // root is the chord root in semitones relative to C4, degree (0-6) is its position in the scale
-// (only used by Auto), inversion is clamped to count - 1, octave shifts the whole chord.
+// (only used by Auto), a positive inversion moves the lowest note up an octave per step, a negative one
+// moves the highest note down (steps beyond count - 1 keep going into the next octave), octave shifts the whole chord.
 inline Chord buildChord(int root, int scale, int degree, int chordIdx, int inversion, int octave) {
 	Chord c;
 	int degreeOffset = SCALES[scale][degree];
@@ -108,9 +109,12 @@ inline Chord buildChord(int root, int scale, int degree, int chordIdx, int inver
 	for (int i = 0; i < c.count; i++)
 		c.notes[i] = c.root + intervals[i];
 
-	int inv = std::min(inversion, c.count - 1);
-	for (int i = 0; i < inv; i++) {
+	for (int i = 0; i < inversion; i++) {
 		c.notes[0] += 12;
+		std::sort(c.notes, c.notes + c.count);
+	}
+	for (int i = 0; i > inversion; i--) {
+		c.notes[c.count - 1] -= 12;
 		std::sort(c.notes, c.notes + c.count);
 	}
 	return c;

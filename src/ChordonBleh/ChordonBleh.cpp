@@ -54,7 +54,7 @@ struct ChordonBleh : Module {
 		configSwitch(TONIC_PARAM, 0.f, 11.f, 0.f, "Tonic", rootLabels);
 		configSwitch(KEY_PARAM, 0.f, NUM_SCALES - 1, 0.f, "Key", keyLabels);
 		configSwitch(CHORD_PARAM, 0.f, NUM_CHORDS - 1, 0.f, "Chord", chordLabels);
-		configParam(INVERSION_PARAM, 0.f, 3.f, 0.f, "Inversion");
+		configParam(INVERSION_PARAM, -5.f, 5.f, 0.f, "Inversion");
 		paramQuantities[INVERSION_PARAM]->snapEnabled = true;
 		configParam(OCTAVE_PARAM, -2.f, 2.f, 0.f, "Octave");
 		paramQuantities[OCTAVE_PARAM]->snapEnabled = true;
@@ -63,7 +63,7 @@ struct ChordonBleh : Module {
 		configInput(KEY_INPUT, "Key (0-10V)");
 		configInput(NOTE_INPUT, "Note (V/oct), rounded down to the key (tonic when unpatched)");
 		configInput(CHORD_INPUT, "Chord (0-10V)");
-		configInput(INVERSION_INPUT, "Inversion (0-10V)");
+		configInput(INVERSION_INPUT, "Inversion (-5 to 5V)");
 		configInput(OCTAVE_INPUT, "Octave (0-10V)");
 		configInput(GATE_INPUT, "Gate (held high when unpatched)");
 
@@ -71,7 +71,7 @@ struct ChordonBleh : Module {
 		configOutput(GATE_OUTPUT, "Gate (polyphonic)");
 	}
 
-	// Knob plus CV, where 0-10V sweeps the whole range of the knob.
+	// Knob plus CV, where 10V of CV spans the whole range of the knob (1V per step for inversion's -5 to 5V).
 	int stepped(int paramId, int inputId) {
 		ParamQuantity* pq = paramQuantities[paramId];
 		float v = params[paramId].getValue();
@@ -110,7 +110,7 @@ struct ChordonBleh : Module {
 			chord = buildChord(state[0], state[1], state[2], state[3], state[4], octave);
 			dispPitchClass = chord.pitchClass;
 			dispSuffix = chord.suffix;
-			dispInversion = std::min(state[4], chord.count - 1);
+			dispInversion = state[4];
 		}
 
 		bool gate = !inputs[GATE_INPUT].isConnected() || inputs[GATE_INPUT].getVoltage() >= 1.f;
@@ -148,7 +148,7 @@ struct ChordDisplay : TransparentWidget {
 				std::snprintf(text, sizeof(text), "%s%s", NOTE_NAMES[module->dispPitchClass], module->dispSuffix);
 			else
 				std::snprintf(text, sizeof(text), "Cmaj7");
-			if (module && module->dispInversion > 0) {
+			if (module && module->dispInversion != 0) {
 				size_t n = std::strlen(text);
 				std::snprintf(text + n, sizeof(text) - n, "/%d", module->dispInversion);
 			}
