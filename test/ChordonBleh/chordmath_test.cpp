@@ -35,7 +35,9 @@ static void checkQuant(const char* label, KeyNote k, int semitone, int degree) {
 int main() {
 	check("C major", buildChord(0, 0, 0, 1, 0, 0), {0, 4, 7}, "");
 	check("C major 1st inv", buildChord(0, 0, 0, 1, 1, 0), {4, 7, 12}, "");
-	check("inversion clamps", buildChord(0, 0, 0, 1, 5, 0), {7, 12, 16}, "");
+	check("inversion past chord size", buildChord(0, 0, 0, 1, 5, 0), {19, 24, 28}, "");
+	check("harmonic minor V = G major", buildChord(7, 7, 4, 0, 0, 0), {7, 11, 14}, "");
+	check("harmonic minor III = Eb aug", buildChord(3, 7, 2, 0, 0, 0), {3, 7, 11}, "aug");
 	check("octave up", buildChord(0, 0, 0, 1, 0, 1), {12, 16, 19}, "");
 	check("auto C major II = Dm", buildChord(2, 0, 1, 0, 0, 0), {2, 5, 9}, "m");
 	check("auto C major VII = Bdim", buildChord(11, 0, 6, 0, 0, 0), {11, 14, 17}, "dim");

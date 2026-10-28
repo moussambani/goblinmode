@@ -20,7 +20,7 @@ Each knob has a matching CV input. CV is added to the knob and the result is rou
 | Control | Range | Notes |
 |---|---|---|
 | TONIC | C..B (12 steps) | Key tonic. CV is V/Oct (1 V = 12 semitones). |
-| KEY | Major, Dorian, Phrygian, Lydian, Mixolydian, Minor, Locrian | CV 0–10 V sweeps the full range. |
+| KEY | Major, Dorian, Phrygian, Lydian, Mixolydian, Minor, Locrian, Harmonic Minor, Melodic Minor, Harmonic Major, Phrygian Dominant, Double Harmonic | CV 0–10 V sweeps the full range. |
 | CHORD | Auto + 13 types | See below. CV 0–10 V sweeps the full range. |
 | INV | 0–3 | Clamped to (note count − 1). CV 0–10 V sweeps the full range. |
 | OCT | −2..+2 | Shifts the whole chord. CV 0–10 V sweeps the full range. |
