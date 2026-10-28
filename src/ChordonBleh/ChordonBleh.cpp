@@ -11,6 +11,7 @@ struct ChordonBleh : Module {
 		CHORD_PARAM,
 		INVERSION_PARAM,
 		OCTAVE_PARAM,
+		STRUM_PARAM,
 		PARAMS_LEN
 	};
 	enum InputId {
@@ -21,6 +22,7 @@ struct ChordonBleh : Module {
 		INVERSION_INPUT,
 		OCTAVE_INPUT,
 		GATE_INPUT,
+		STRUM_INPUT,
 		INPUTS_LEN
 	};
 	enum OutputId {
@@ -36,8 +38,9 @@ struct ChordonBleh : Module {
 	int lastState[5] = {};
 	int lastOctave = 0;
 	bool built = false;
-	int lastSettings[5] = {};
+	int lastSettings[6] = {};
 	bool lastGate = false;
+	float strumTime = 0.f;	// seconds since the last gate rising edge
 	float settingTimer = 0.f;
 	bool clearPending = false;
 
@@ -64,6 +67,7 @@ struct ChordonBleh : Module {
 		paramQuantities[INVERSION_PARAM]->snapEnabled = true;
 		configParam(OCTAVE_PARAM, -2.f, 2.f, 0.f, "Octave");
 		paramQuantities[OCTAVE_PARAM]->snapEnabled = true;
+		configParam(STRUM_PARAM, 0.f, 500.f, 0.f, "Strum", " ms");
 
 		configInput(TONIC_INPUT, "Tonic (V/oct)");
 		configInput(KEY_INPUT, "Key (0-10V)");
@@ -72,6 +76,7 @@ struct ChordonBleh : Module {
 		configInput(INVERSION_INPUT, "Inversion (-5 to 5V)");
 		configInput(OCTAVE_INPUT, "Octave (0-10V)");
 		configInput(GATE_INPUT, "Gate (held high when unpatched)");
+		configInput(STRUM_INPUT, "Strum (0-10V)");
 
 		configOutput(CHORD_OUTPUT, "Chord (polyphonic V/oct)");
 		configOutput(GATE_OUTPUT, "Gate (polyphonic)");
@@ -87,13 +92,15 @@ struct ChordonBleh : Module {
 	}
 
 	void showSetting(int which, int value) {
-		static const char* const SETTING_LABELS[5] = {"Tonic", "Key", "Chord", "Inv", "Oct"};
+		static const char* const SETTING_LABELS[6] = {"Tonic", "Key", "Chord", "Inv", "Oct", "Strum"};
 		if (which == 0)
 			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %s", SETTING_LABELS[which], NOTE_NAMES[value]);
 		else if (which == 1)
 			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %s", SETTING_LABELS[which], SCALE_NAMES[value]);
 		else if (which == 2)
 			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %s", SETTING_LABELS[which], CHORDS[value].name);
+		else if (which == 5)
+			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %d ms", SETTING_LABELS[which], value);
 		else
 			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %d", SETTING_LABELS[which], value);
 		dispSetting = which;
@@ -123,22 +130,30 @@ struct ChordonBleh : Module {
 			stepped(INVERSION_PARAM, INVERSION_INPUT),
 		};
 		int octave = stepped(OCTAVE_PARAM, OCTAVE_INPUT);
+		// Each gate opens one strum delay after the previous one; 10V of CV spans the whole 0-500 ms range
+		float strumMs = params[STRUM_PARAM].getValue();
+		if (inputs[STRUM_INPUT].isConnected())
+			strumMs += inputs[STRUM_INPUT].getVoltage() * 50.f;
+		strumMs = clamp(strumMs, 0.f, 500.f);
+		float strumDelay = strumMs / 1000.f;
 		bool gate = !inputs[GATE_INPUT].isConnected() || inputs[GATE_INPUT].getVoltage() >= 1.f;
 
 		// A changed setting is shown until the next note, but for at least 2 seconds
-		int settings[5] = {tonic, key, state[3], state[4], octave};
+		int settings[6] = {tonic, key, state[3], state[4], octave, (int) std::round(strumMs)};
 		bool noteEvent = (gate && !lastGate) || keyNote.semitone != lastState[0];
+		if (gate && !lastGate)
+			strumTime = 0.f;
 		lastGate = gate;
 		if (built) {
 			int changed = 0;
-			while (changed < 5 && settings[changed] == lastSettings[changed])
+			while (changed < 6 && settings[changed] == lastSettings[changed])
 				changed++;
-			if (changed < 5)
+			if (changed < 6)
 				showSetting(changed, settings[changed]);
 			else if (noteEvent && dispSetting >= 0)
 				clearPending = true;
 		}
-		std::copy(settings, settings + 5, lastSettings);
+		std::copy(settings, settings + 6, lastSettings);
 		if (clearPending && settingTimer <= 0.f) {
 			dispSetting = -1;
 			clearPending = false;
@@ -155,11 +170,13 @@ struct ChordonBleh : Module {
 			dispInversion = state[4];
 		}
 
+		strumTime = std::min(strumTime + args.sampleTime, 10.f);
+
 		outputs[CHORD_OUTPUT].setChannels(chord.count);
 		outputs[GATE_OUTPUT].setChannels(chord.count);
 		for (int i = 0; i < chord.count; i++) {
 			outputs[CHORD_OUTPUT].setVoltage(chord.notes[i] / 12.f, i);
-			outputs[GATE_OUTPUT].setVoltage(gate ? 10.f : 0.f, i);
+			outputs[GATE_OUTPUT].setVoltage(gate && strumTime >= i * strumDelay ? 10.f : 0.f, i);
 		}
 	}
 };
@@ -260,13 +277,14 @@ struct ChordonBlehWidget : ModuleWidget {
 			{"CHORD", ChordonBleh::CHORD_PARAM, ChordonBleh::CHORD_INPUT},
 			{"INV", ChordonBleh::INVERSION_PARAM, ChordonBleh::INVERSION_INPUT},
 			{"OCT", ChordonBleh::OCTAVE_PARAM, ChordonBleh::OCTAVE_INPUT},
+			{"STRUM", ChordonBleh::STRUM_PARAM, ChordonBleh::STRUM_INPUT},
 		};
-		float y = 36.f;
+		float y = 32.f;
 		for (const Row& row : rows) {
 			addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(12.7f, y)), module, row.param));
 			addInput(createInputCentered<PJ301MPort>(mm2px(Vec(38.1f, y)), module, row.input));
 			addLabel(Vec(25.4f, y), row.label);
-			y += 14.f;
+			y += 12.5f;
 		}
 
 		const float portY = 115.f;

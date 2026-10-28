@@ -24,6 +24,7 @@ Each knob has a matching CV input. CV is added to the knob and the result is rou
 | CHORD | Auto + 13 types | See below. CV 0–10 V sweeps the full range. |
 | INV | 0–3 | Clamped to (note count − 1). CV 0–10 V sweeps the full range. |
 | OCT | −2..+2 | Shifts the whole chord. CV 0–10 V sweeps the full range. |
+| STRUM | 0–500 ms | Continuous. Delay between consecutive gates. CV 0–10 V sweeps the full range. |
 
 Inputs and outputs, in the bottom section: `NOTE` (V/Oct in), `GATE IN`, `CHORD` (poly V/Oct out), `GATE OUT` (poly gate out).
 
@@ -39,10 +40,11 @@ Chord types: Auto, Major, Minor, Diminished, Augmented, Sus2, Sus4, Major 7, Min
 - **Rounding tolerance.** The note voltage is floored after adding 1e-3 semitones, so exact semitone voltages are not pushed to the note below by float error. Slightly flat pitches still round down.
 - **Inversion.** Range -5 to 5, default 0, CV -5 to 5 V (1 V per step). Positive steps move the lowest note up an octave, negative steps move the highest note down an octave, keeping the notes sorted. Steps beyond the chord size continue into the next octave rather than clamping.
 - **Gate.** Polyphonic, one channel per chord note, 10 V while `GATE IN` is at or above 1 V. It is held high when `GATE IN` is unpatched.
+- **Strum.** On a `GATE IN` rising edge the first channel's gate opens immediately and each following channel opens one STRUM delay after the previous (channel *i* at *i* × delay). All gates close together when `GATE IN` falls. Only gates are delayed, pitches are not. Changing the note while the gate is held does not re-strum.
 - **No root output.** A mono root output existed in an earlier version and was removed.
 - **Naming.** The key-tonic knob is called TONIC so it is not confused with the chord root.
 - **Chord recomputation.** The chord is rebuilt only when a quantized input changes, not every sample, and the audio path does not allocate.
-- **Chord display.** A small display shows the chord name, such as `Cmaj7` or `Dm/1` or `Dm/-1` (inversion after the slash, hidden at 0). When a setting changes, by knob or CV, the display shows it instead, such as `Tonic: C#`, until another setting changes or a note is played (gate rising edge or quantized note change). It stays for at least 2 seconds, and a note arriving earlier clears it once the 2 seconds are up. The text shrinks to fit long values.
+- **Chord display.** A small display shows the chord name, such as `Cmaj7` or `Dm/1` or `Dm/-1` (inversion after the slash, hidden at 0). When a setting changes, by knob or CV, the display shows it instead, such as `Tonic: C#` or `Strum: 120 ms`, until another setting changes or a note is played (gate rising edge or quantized note change). It stays for at least 2 seconds, and a note arriving earlier clears it once the 2 seconds are up. The text shrinks to fit long values.
 - **Panel labels are drawn in code.** Rack does not render `<text>` in panel SVGs, so labels are drawn by the widget. The SVG is a plain 10HP (50.8 mm) dark background.
 
 ## Code layout
@@ -70,6 +72,5 @@ Plugin-level files (`plugin.json`, `src/plugin.cpp`, `Makefile`) are described i
 
 - Diatonic 7th chords for `Auto`.
 - Drop-2 / open voicings.
-- Strum or per-voice gate delay.
 - Per-note mono outputs through an expander.
 - A designed panel (currently a plain background) and panel text converted to paths before release.
