@@ -1,5 +1,7 @@
 #include "plugin.hpp"
 #include "ChordMath.hpp"
+#include "ChordonBlehExpander.hpp"
+#include "PanelText.hpp"
 
 using namespace chordmath;
 
@@ -42,7 +44,7 @@ struct ChordonBleh : Module {
 	};
 
 	Chord chord;
-	int lastState[5] = {};
+	int lastState[7] = {};
 	int lastOctave = 0;
 	bool built = false;
 	int lastSettings[6] = {};
@@ -91,6 +93,14 @@ struct ChordonBleh : Module {
 
 		configOutput(CHORD_OUTPUT, "Chord (polyphonic V/oct)");
 		configOutput(GATE_OUTPUT, "Gate (polyphonic)");
+
+		rightExpander.producerMessage = new ExtensionsMessage();
+		rightExpander.consumerMessage = new ExtensionsMessage();
+	}
+
+	~ChordonBleh() {
+		delete (ExtensionsMessage*) rightExpander.producerMessage;
+		delete (ExtensionsMessage*) rightExpander.consumerMessage;
 	}
 
 	// Knob plus CV, where 10V of CV spans the whole range of the knob (1V per step for inversion's -5 to 5V).
@@ -164,12 +174,24 @@ struct ChordonBleh : Module {
 			note = (int) std::floor(inputs[NOTE_INPUT].getVoltage() * 12.f + 1e-3f);
 		KeyNote keyNote = quantizeToKey(note, tonic, key);
 
-		int state[5] = {
+		// The expander on the right picks the optional 4th and 5th note per degree, and shows which degree is playing
+		Extensions ext = {0, 0};
+		if (rightExpander.module && rightExpander.module->model == modelChordonBlehExt) {
+			const ExtensionsMessage* in = (const ExtensionsMessage*) rightExpander.consumerMessage;
+			ext = {in->fourth[keyNote.degree], in->fifth[keyNote.degree]};
+			DegreeMessage* out = (DegreeMessage*) rightExpander.module->leftExpander.producerMessage;
+			out->degree = keyNote.degree;
+			rightExpander.module->leftExpander.messageFlipRequested = true;
+		}
+
+		int state[7] = {
 			keyNote.semitone,
 			key,
 			keyNote.degree,
 			stepped(CHORD_PARAM, CHORD_INPUT),
 			stepped(INVERSION_PARAM, INVERSION_INPUT),
+			ext.fourth,
+			ext.fifth,
 		};
 		int octave = stepped(OCTAVE_PARAM, OCTAVE_INPUT);
 		// Each gate opens one strum delay after the previous one; 10V of CV spans the whole 0-500 ms range
@@ -204,11 +226,11 @@ struct ChordonBleh : Module {
 		}
 		settingTimer -= args.sampleTime;
 
-		if (!built || !std::equal(state, state + 5, lastState) || octave != lastOctave) {
-			std::copy(state, state + 5, lastState);
+		if (!built || !std::equal(state, state + 7, lastState) || octave != lastOctave) {
+			std::copy(state, state + 7, lastState);
 			lastOctave = octave;
 			built = true;
-			chord = buildChord(state[0], state[1], state[2], state[3], state[4], octave);
+			chord = buildChord(state[0], state[1], state[2], state[3], state[4], octave, ext);
 			dispPitchClass = chord.pitchClass;
 			dispSuffix = chord.suffix;
 			dispInversion = state[4];
@@ -231,11 +253,6 @@ struct ChordonBleh : Module {
 		}
 	}
 };
-
-
-static std::shared_ptr<window::Font> loadPanelFont() {
-	return APP->window->loadFont(asset::system("res/fonts/ShareTechMono-Regular.ttf"));
-}
 
 
 struct ChordDisplay : TransparentWidget {
@@ -274,24 +291,6 @@ struct ChordDisplay : TransparentWidget {
 			}
 		}
 		TransparentWidget::drawLayer(args, layer);
-	}
-};
-
-
-// Rack does not render <text> in panel SVGs, so labels are drawn by the widget.
-struct PanelLabel : TransparentWidget {
-	std::string text;
-	float fontSize = 8.f;
-
-	void draw(const DrawArgs& args) override {
-		std::shared_ptr<window::Font> font = loadPanelFont();
-		if (!font)
-			return;
-		nvgFontFaceId(args.vg, font->handle);
-		nvgFontSize(args.vg, fontSize);
-		nvgFillColor(args.vg, nvgRGB(0xd8, 0xd8, 0xe0));
-		nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-		nvgText(args.vg, 0.f, 0.f, text.c_str(), NULL);
 	}
 };
 
@@ -350,11 +349,12 @@ struct ChordonBlehWidget : ModuleWidget {
 			y += 12.5f;
 		}
 
-		const float portY = 115.f;
-		addLabel(Vec(6.35f, 108.f), "NOTE", 6.5f);
-		addLabel(Vec(19.05f, 108.f), "GATE IN", 6.5f);
-		addLabel(Vec(31.75f, 108.f), "CHORD", 6.5f);
-		addLabel(Vec(44.45f, 108.f), "GATE OUT", 6.5f);
+		const float portY = 111.f;
+		addLabel(Vec(6.35f, 104.5f), "NOTE", 6.5f);
+		addLabel(Vec(19.05f, 104.5f), "GATE IN", 6.5f);
+		addLabel(Vec(31.75f, 104.5f), "CHORD", 6.5f);
+		addLabel(Vec(44.45f, 104.5f), "GATE OUT", 6.5f);
+		addLabel(Vec(25.4f, 123.5f), "goblin mode", 8.f);
 		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(6.35f, portY)), module, ChordonBleh::NOTE_INPUT));
 		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(19.05f, portY)), module, ChordonBleh::GATE_INPUT));
 		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(31.75f, portY)), module, ChordonBleh::CHORD_OUTPUT));

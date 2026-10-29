@@ -46,6 +46,22 @@ int main() {
 	check("root above first octave", buildChord(18, 0, 4, 1, 0, 0), {18, 22, 25}, "");
 	check("negative root", buildChord(-1, 0, 6, 1, 0, 0), {-1, 3, 6}, "");
 
+	// Extensions: Auto only, fourth then fifth. Options: 0 Off, 1 Dia, fourth 2 = 6, 3 = m7, 4 = M7, fifth 2 = b9, 3 = 9, 4 = #9, 5 = 11, 6 = #11
+	check("C major VI + M7", buildChord(9, 0, 5, 0, 0, 0, {4, 0}), {9, 12, 16, 20}, "m(M7)");
+	check("C major VI + M7 + b9", buildChord(9, 0, 5, 0, 0, 0, {4, 2}), {9, 12, 16, 20, 22}, "m(M7,b9)");
+	check("C major VI + 9 only", buildChord(9, 0, 5, 0, 0, 0, {0, 3}), {9, 12, 16, 23}, "m(9)");
+	check("C major VI diatonic 7th", buildChord(9, 0, 5, 0, 0, 0, {1, 0}), {9, 12, 16, 19}, "m7");
+	check("C major VI diatonic 7th and 9th", buildChord(9, 0, 5, 0, 0, 0, {1, 1}), {9, 12, 16, 19, 23}, "m(m7,9)");
+	check("C major I diatonic 7th", buildChord(0, 0, 0, 0, 0, 0, {1, 0}), {0, 4, 7, 11}, "maj7");
+	check("C major V diatonic 7th and 9th = G9", buildChord(7, 0, 4, 0, 0, 0, {1, 1}), {7, 11, 14, 17, 21}, "9");
+	check("C major V + m7", buildChord(7, 0, 4, 0, 0, 0, {3, 0}), {7, 11, 14, 17}, "7");
+	check("C major VII diatonic 7th = Bm7b5 (no name)", buildChord(11, 0, 6, 0, 0, 0, {1, 0}), {11, 14, 17, 21}, "dim(m7)");
+	check("C major VII + 6 = dim7", buildChord(11, 0, 6, 0, 0, 0, {2, 0}), {11, 14, 17, 20}, "dim7");
+	check("Phrygian Dominant I + #11", buildChord(0, 10, 0, 0, 0, 0, {0, 6}), {0, 4, 7, 18}, "(#11)");
+	check("extensions with inversion", buildChord(9, 0, 5, 0, 1, 0, {4, 2}), {12, 16, 20, 21, 22}, "m(M7,b9)");
+	check("extensions ignored for explicit chord", buildChord(0, 0, 0, 1, 0, 0, {4, 2}), {0, 4, 7}, "");
+	check("out of range options are clamped", buildChord(9, 0, 5, 0, 0, 0, {99, -3}), {9, 12, 16, 20}, "m(M7)");
+
 	checkQuant("in-key note stays", quantizeToKey(4, 0, 0), 4, 2);
 	checkQuant("C# rounds down to C in C major", quantizeToKey(1, 0, 0), 0, 0);
 	checkQuant("A# rounds down to A in C major", quantizeToKey(10, 0, 0), 9, 5);

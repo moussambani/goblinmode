@@ -28,7 +28,7 @@ Each knob has a matching CV input. CV is added to the knob and the result is rou
 
 Inputs and outputs, in the bottom section: `NOTE` (V/Oct in), `GATE IN`, `CHORD` (poly V/Oct out), `GATE OUT` (poly gate out).
 
-Chord types: Auto, Major, Minor, Diminished, Augmented, Sus2, Sus4, Major 7, Minor 7, Dominant 7, Diminished 7, Major 6, Minor 6, Dominant 9. Chords have 3–5 notes, and the output channel count follows the note count.
+Chord types: Auto, Major, Minor, Diminished, Augmented, Sus2, Sus4, Major 7, Minor 7, Dominant 7, Diminished 7, Major 6, Minor 6, Dominant 9. Chords have 3–5 notes, and the output channel count follows the note count. In `Auto`, the optional expander adds a 4th and a 5th note per scale degree (see Extension expander).
 
 ## Design decisions
 
@@ -36,7 +36,7 @@ Chord types: Auto, Major, Minor, Diminished, Augmented, Sus2, Sus4, Major 7, Min
 - **Octave carries through.** The chord sits in the octave of the incoming note, and OCT shifts it further. Notes below the tonic wrap down correctly (the key repeats every octave).
 - **Unpatched `NOTE` uses the tonic.** The module always produces a chord, even with nothing patched.
 - **Auto chord quality.** `Auto` builds the diatonic triad for the quantized note by stacking thirds from the scale (in C major: C, Dm, Em, F, G, Am, Bdim). The suffix is looked up from the chord table. Explicit chord types ignore the scale for quality and are built on the quantized note as their root.
-- **Auto is triads only.** It never produces diatonic 7ths.
+- **Auto is triads unless the expander adds notes.** Without a `ChordonBlehExt` on its right, `Auto` never produces more than three notes.
 - **Rounding tolerance.** The note voltage is floored after adding 1e-3 semitones, so exact semitone voltages are not pushed to the note below by float error. Slightly flat pitches still round down.
 - **Inversion.** Range -5 to 5, default 0, CV -5 to 5 V (1 V per step). Positive steps move the lowest note up an octave, negative steps move the highest note down an octave, keeping the notes sorted. Steps beyond the chord size continue into the next octave rather than clamping.
 - **Gate.** Polyphonic, one channel per chord note, 10 V while `GATE IN` is at or above 1 V. It is held high when `GATE IN` is unpatched.
@@ -45,7 +45,20 @@ Chord types: Auto, Major, Minor, Diminished, Augmented, Sus2, Sus4, Major 7, Min
 - **Naming.** The key-tonic knob is called TONIC so it is not confused with the chord root.
 - **Chord recomputation.** The chord is rebuilt only when a quantized input changes, not every sample, and the audio path does not allocate.
 - **Chord display.** A small display shows the chord name, such as `Cmaj7` or `Dm/1` or `Dm/-1` (inversion after the slash, hidden at 0). When a setting changes, by knob or CV, the display shows it instead, such as `Tonic: C#` or `Strum: 120 ms`, until another setting changes or a note is played (gate rising edge or quantized note change). It stays for at least 2 seconds, and a note arriving earlier clears it once the 2 seconds are up. The text shrinks to fit long values.
+- **Brand.** Both panels end with a separator line and the text `goblin mode`. The base module's port row sits above it.
 - **Panel labels are drawn in code.** Rack does not render `<text>` in panel SVGs, so labels are drawn by the widget. The SVG is a plain 10HP (50.8 mm) dark background.
+
+## Extension expander (ChordonBlehExt)
+
+A 7HP module placed directly to the right of ChordonBleh. It only picks values; the music logic stays in the base module (`buildChord`). Without it the base behaves as before.
+
+- **Controls.** For each of the 7 scale degrees, two cycle buttons: a 4th note and a 5th note. A click steps to the next value and wraps after the last; the button face shows the current value. The 5th note does not need the 4th. Values are saved with the patch (they are stepped params). Vertical layout: one row per degree, with a light for the playing degree, then the 4th note column, then the 5th note column.
+- **4th note options:** Off, Dia (the scale's 7th), 6, m7, M7.
+- **5th note options:** Off, Dia (the scale's 9th), b9, 9, #9, 11, #11. No 13ths.
+- **Chromatic on purpose.** M7 on degree VI in C major gives Am(M7), with G♯, not the diatonic Am7. `Dia` stacks thirds from the scale and so works in every key.
+- **Auto only.** Explicit chord types ignore the extensions. A rebuild happens when the selected values for the current degree change.
+- **Names.** A full interval set that matches the chord table gets its table name (`m7`, `maj7`, `9`, `dim7`), anything else shows as the triad plus the added notes, such as `Am(M7,b9)`. The base display is not used to show extension changes.
+- **Messages.** Rack's expander message API, one sample of latency: the expander writes 14 ints (`ExtensionsMessage`) into the base's `rightExpander`, the base writes the current degree (`DegreeMessage`) into the expander's `leftExpander`. Both are in `ChordonBlehExpander.hpp`.
 
 ## Code layout
 
@@ -53,7 +66,10 @@ Chord types: Auto, Major, Minor, Diminished, Augmented, Sus2, Sus4, Major 7, Min
 |---|---|
 | `src/ChordonBleh/ChordMath.hpp` | Pure chord logic with no Rack dependencies: scale and chord tables, `quantizeToKey`, `buildChord`. |
 | `src/ChordonBleh/ChordonBleh.cpp` | Module (params, CV handling, `process()`), chord display widget, panel labels, module widget. |
-| `res/ChordonBleh.svg` | Panel background. |
+| `src/ChordonBleh/ChordonBlehExt.cpp` | Expander module, the `CycleButton` widget and the expander widget. |
+| `src/ChordonBleh/ChordonBlehExpander.hpp` | Message structs shared by the module and the expander. |
+| `src/ChordonBleh/PanelText.hpp` | Panel font loader and `PanelLabel`, shared by both modules. |
+| `res/ChordonBleh.svg`, `res/ChordonBlehExt.svg` | Panel backgrounds. |
 | `test/ChordonBleh/chordmath_test.cpp` | Standalone test of the chord logic. |
 
 Plugin-level files (`plugin.json`, `src/plugin.cpp`, `Makefile`) are described in the root `design.md`.
@@ -66,11 +82,10 @@ Plugin-level files (`plugin.json`, `src/plugin.cpp`, `Makefile`) are described i
 ## Status
 
 - Builds cleanly, installs, and loads in Rack without log warnings. The chord logic test passes.
-- Not yet checked by ear or by eye: panel layout, the display, and audio output with a poly oscillator.
+- Not yet checked by ear or by eye: panel layout, the display, and audio output with a poly oscillator. The expander builds but has not been loaded in Rack yet.
 
 ## Possible next steps
 
-- Diatonic 7th chords for `Auto`.
 - Drop-2 / open voicings.
 - Per-note mono outputs through an expander.
 - A designed panel (currently a plain background) and panel text converted to paths before release.

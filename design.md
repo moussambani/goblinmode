@@ -7,6 +7,7 @@
 | Module | Folder | Notes |
 |---|---|---|
 | ChordonBleh | `src/ChordonBleh/` | Polyphonic chord generator. See `src/ChordonBleh/design.md`. |
+| ChordonBlehExt | `src/ChordonBleh/` | Expander for ChordonBleh (4th/5th notes per degree). Documented in the ChordonBleh design notes. |
 
 ## Layout
 

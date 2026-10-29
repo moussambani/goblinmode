@@ -22,6 +22,15 @@
         "Quantizer",
         "Utility"
       ]
+    },
+    {
+      "slug": "ChordonBlehExt",
+      "name": "ChordonBleh Ext",
+      "description": "Expander for ChordonBleh: optional 4th and 5th chord notes per scale degree",
+      "tags": [
+        "Expander",
+        "Polyphonic"
+      ]
     }
   ]
 }
