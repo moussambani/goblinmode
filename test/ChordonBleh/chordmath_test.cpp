@@ -72,6 +72,29 @@ int main() {
 	checkQuant("tonic offset: Eb rounds down to D", quantizeToKey(3, 2, 5), 2, 0);
 	checkQuant("octave up", quantizeToKey(16, 0, 0), 16, 2);
 
+	// Strum divisions: knob position picks the division, delay follows the clock
+	auto near = [](float a, float b) { return std::fabs(a - b) < 1e-5f; };
+	if (divisionIndex(0.f) != 0 || divisionIndex(500.f) != NUM_DIVISIONS - 1 || divisionIndex(250.f) != 4 || divisionIndex(-5.f) != 0 || divisionIndex(900.f) != NUM_DIVISIONS - 1) {
+		failures++;
+		std::printf("FAIL divisionIndex\n");
+	}
+	for (int i = 0; i < NUM_DIVISIONS; i++) {
+		if (divisionIndex(divisionValue(i)) != i) {
+			failures++;
+			std::printf("FAIL divisionValue round trip %d\n", i);
+		}
+	}
+	// 120 BPM, one pulse per quarter note = 0.5 s
+	if (!near(strumDelaySeconds(5, 0.5f, 1.f), 0.125f) || !near(strumDelaySeconds(7, 0.5f, 1.f), 0.25f) || !near(strumDelaySeconds(0, 0.5f, 1.f), 0.f)) {
+		failures++;
+		std::printf("FAIL strumDelaySeconds quarter pulse\n");
+	}
+	// 1/16 pulses at 120 BPM arrive every 0.125 s; a 1/16 strum step is one pulse
+	if (!near(strumDelaySeconds(5, 0.125f, 0.25f), 0.125f) || !near(strumDelaySeconds(6, 0.5f, 1.f), 1.f / 6 * 0.5f * 2.f)) {
+		failures++;
+		std::printf("FAIL strumDelaySeconds sixteenth pulse / triplet\n");
+	}
+
 	std::printf(failures ? "%d failure(s)\n" : "all passed\n", failures);
 	return failures != 0;
 }

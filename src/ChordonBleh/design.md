@@ -24,9 +24,9 @@ Each knob has a matching CV input. CV is added to the knob and the result is rou
 | CHORD | Auto + 13 types | See below. CV 0–10 V sweeps the full range. |
 | INV | 0–3 | Clamped to (note count − 1). CV 0–10 V sweeps the full range. |
 | OCT | −2..+2 | Shifts the whole chord. CV 0–10 V sweeps the full range. |
-| STRUM | 0–500 ms | Continuous. Delay between consecutive gates. CV 0–10 V sweeps the full range. |
+| STRUM | 0–500 ms | Continuous. Delay between consecutive gates. CV 0–10 V sweeps the full range. With a clock patched it picks a note value instead (see Strum). |
 
-Inputs and outputs, in the bottom section: `NOTE` (V/Oct in), `GATE IN`, `CHORD` (poly V/Oct out), `GATE OUT` (poly gate out).
+Inputs and outputs, in the bottom section: `NOTE` (V/Oct in), `GATE IN`, `CLOCK` (strum tempo, optional), `CHORD` (poly V/Oct out), `GATE OUT` (poly gate out).
 
 Chord types: Auto, Major, Minor, Diminished, Augmented, Sus2, Sus4, Major 7, Minor 7, Dominant 7, Diminished 7, Major 6, Minor 6, Dominant 9. Chords have 3–5 notes, and the output channel count follows the note count. In `Auto`, the optional expander adds a 4th and a 5th note per scale degree (see Extension expander).
 
@@ -41,12 +41,13 @@ Chord types: Auto, Major, Minor, Diminished, Augmented, Sus2, Sus4, Major 7, Min
 - **Inversion.** Range -5 to 5, default 0, CV -5 to 5 V (1 V per step). Positive steps move the lowest note up an octave, negative steps move the highest note down an octave, keeping the notes sorted. Steps beyond the chord size continue into the next octave rather than clamping.
 - **Gate.** Polyphonic, one channel per chord note, 10 V while `GATE IN` is at or above 1 V. It is held high when `GATE IN` is unpatched.
 - **Strum.** On a `GATE IN` rising edge the gates open one STRUM delay apart; all gates close together when `GATE IN` falls. Only gates are delayed, pitches are not. Changing the note while the gate is held does not re-strum. The direction is set in the context menu (saved with the patch): **Up** (default, lowest voice first), **Down** (highest first), **Up & down** (up, then back down in one strum; each voice except the top is re-triggered on the way down, with the gate low for 1 ms, skipped when the delay is under 2 ms), **Random** (new voice order on every gate).
+- **Strum clock.** With `CLOCK` patched the STRUM knob (and its CV) picks the delay between consecutive notes as a note value by position: Off, 1/64, 1/32T, 1/32, 1/16T, 1/16, 1/8T, 1/8, so every voice lands on the grid whatever the chord size. The tempo is the time between the last two rising edges (5 ms to 4 s) and is kept when the clock stops; until two edges have been seen the delay is 0. What one clock pulse stands for is set in the context menu (**Clock pulse length**: 1/4 default, 1/8, 1/16, 1/32, saved with the patch). While a clock is patched, editing the knob snaps it to the nearest division (dragging adds up the distance moved, one division per 20 px, so it does not depend on mouse speed); the value is not touched when a clock is patched or unpatched, so the ms setting survives until the knob is moved. The tooltip and the changed-setting readout show the division, such as `Strum: 1/16`. `CLOCK` is the last input so cables in older patches keep their ports.
 - **No root output.** A mono root output existed in an earlier version and was removed.
 - **Naming.** The key-tonic knob is called TONIC so it is not confused with the chord root.
 - **Chord recomputation.** The chord is rebuilt only when a quantized input changes, not every sample, and the audio path does not allocate.
 - **Chord display.** A small display shows the chord name, such as `Cmaj7` or `Dm/1` or `Dm/-1` (inversion after the slash, hidden at 0). When a setting changes, by knob or CV, the display shows it instead, such as `Tonic: C#` or `Strum: 120 ms`, until another setting changes or a note is played (gate rising edge or quantized note change). It stays for at least 2 seconds, and a note arriving earlier clears it once the 2 seconds are up. The text shrinks to fit long values.
 - **Brand.** Both panels end with a separator line and the text `goblin mode`. The base module's port row sits above it.
-- **Panel labels are drawn in code.** Rack does not render `<text>` in panel SVGs, so labels are drawn by the widget. The SVG is a plain 10HP (50.8 mm) dark background.
+- **Panel labels are drawn in code.** Rack does not render `<text>` in panel SVGs, so labels are drawn by the widget. The SVG is a plain 12HP (60.96 mm) dark background.
 
 ## Extension expander (ChordonBlehExt)
 

@@ -79,6 +79,40 @@ struct Extensions {
 	int fifth;
 };
 
+// Strum delay between consecutive notes when a clock is patched, as a note value (length in quarter notes)
+struct Division {
+	const char* name;
+	float quarters;
+};
+
+const int NUM_DIVISIONS = 8;
+const Division DIVISIONS[NUM_DIVISIONS] = {
+	{"Off", 0.f}, {"1/64", 1.f / 16}, {"1/32T", 1.f / 12}, {"1/32", 1.f / 8},
+	{"1/16T", 1.f / 6}, {"1/16", 1.f / 4}, {"1/8T", 1.f / 3}, {"1/8", 1.f / 2},
+};
+
+// What one pulse of the clock input stands for
+const int NUM_CLOCK_PULSES = 4;
+const Division CLOCK_PULSES[NUM_CLOCK_PULSES] = {
+	{"1/4", 1.f}, {"1/8", 1.f / 2}, {"1/16", 1.f / 4}, {"1/32", 1.f / 8},
+};
+
+// Picks a division from the strum knob (0-500) by position
+inline int divisionIndex(float strumMs) {
+	int idx = (int) std::round(strumMs / 500.f * (NUM_DIVISIONS - 1));
+	return std::min(std::max(idx, 0), NUM_DIVISIONS - 1);
+}
+
+// The knob value (0-500) at the centre of a division
+inline float divisionValue(int division) {
+	return division * 500.f / (NUM_DIVISIONS - 1);
+}
+
+// Delay in seconds for a division, given the time between clock pulses and the length of one pulse in quarter notes
+inline float strumDelaySeconds(int division, float pulseSeconds, float pulseQuarters) {
+	return DIVISIONS[division].quarters * pulseSeconds / pulseQuarters;
+}
+
 struct Chord {
 	int notes[5];		// semitones relative to C4, ascending
 	int count;

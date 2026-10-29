@@ -25,6 +25,7 @@ struct ChordonBleh : Module {
 		OCTAVE_INPUT,
 		GATE_INPUT,
 		STRUM_INPUT,
+		CLOCK_INPUT,	// last so cables in older patches keep their ports
 		INPUTS_LEN
 	};
 	enum OutputId {
@@ -43,6 +44,25 @@ struct ChordonBleh : Module {
 		NUM_STRUM_MODES
 	};
 
+	// Shows divisions instead of milliseconds while a clock is patched
+	struct StrumQuantity : ParamQuantity {
+		bool clocked() {
+			return module && module->inputs[CLOCK_INPUT].isConnected();
+		}
+		std::string getDisplayValueString() override {
+			return clocked() ? DIVISIONS[divisionIndex(getValue())].name : ParamQuantity::getDisplayValueString();
+		}
+		std::string getUnit() override {
+			return clocked() ? "" : ParamQuantity::getUnit();
+		}
+		// Edits snap to a division while a clock is patched; the value is left alone until then
+		void setValue(float value) override {
+			if (clocked())
+				value = divisionValue(divisionIndex(value));
+			ParamQuantity::setValue(value);
+		}
+	};
+
 	Chord chord;
 	int lastState[7] = {};
 	int lastOctave = 0;
@@ -51,6 +71,11 @@ struct ChordonBleh : Module {
 	bool lastGate = false;
 	float strumTime = 0.f;	// seconds since the last gate rising edge
 	int strumMode = STRUM_UP;
+	int clockPulse = 0;	// index into CLOCK_PULSES: what one pulse of the clock input stands for
+	dsp::SchmittTrigger clockTrigger;
+	float clockTime = 0.f;		// seconds since the last clock pulse
+	float clockPeriod = 0.f;	// seconds between the last two pulses, 0 until measured
+	bool clockSeen = false;
 	// Per channel, set on each gate rising edge: the strum step it opens on, and the step it re-opens on (-1 for none)
 	int strumSlot[5] = {0, 1, 2, 3, 4};
 	int strumRetrigger[5] = {-1, -1, -1, -1, -1};
@@ -80,7 +105,7 @@ struct ChordonBleh : Module {
 		paramQuantities[INVERSION_PARAM]->snapEnabled = true;
 		configParam(OCTAVE_PARAM, -2.f, 2.f, 0.f, "Octave");
 		paramQuantities[OCTAVE_PARAM]->snapEnabled = true;
-		configParam(STRUM_PARAM, 0.f, 500.f, 0.f, "Strum", " ms");
+		configParam<StrumQuantity>(STRUM_PARAM, 0.f, 500.f, 0.f, "Strum", " ms");
 
 		configInput(TONIC_INPUT, "Tonic (V/oct)");
 		configInput(KEY_INPUT, "Key (0-10V)");
@@ -90,6 +115,7 @@ struct ChordonBleh : Module {
 		configInput(OCTAVE_INPUT, "Octave (0-10V)");
 		configInput(GATE_INPUT, "Gate (held high when unpatched)");
 		configInput(STRUM_INPUT, "Strum (0-10V)");
+		configInput(CLOCK_INPUT, "Clock (strum steps are note values of its tempo when patched)");
 
 		configOutput(CHORD_OUTPUT, "Chord (polyphonic V/oct)");
 		configOutput(GATE_OUTPUT, "Gate (polyphonic)");
@@ -134,6 +160,7 @@ struct ChordonBleh : Module {
 	json_t* dataToJson() override {
 		json_t* rootJ = json_object();
 		json_object_set_new(rootJ, "strumMode", json_integer(strumMode));
+		json_object_set_new(rootJ, "clockPulse", json_integer(clockPulse));
 		return rootJ;
 	}
 
@@ -141,6 +168,9 @@ struct ChordonBleh : Module {
 		json_t* modeJ = json_object_get(rootJ, "strumMode");
 		if (modeJ)
 			strumMode = clamp((int) json_integer_value(modeJ), 0, NUM_STRUM_MODES - 1);
+		json_t* pulseJ = json_object_get(rootJ, "clockPulse");
+		if (pulseJ)
+			clockPulse = clamp((int) json_integer_value(pulseJ), 0, NUM_CLOCK_PULSES - 1);
 	}
 
 	void showSetting(int which, int value) {
@@ -151,6 +181,8 @@ struct ChordonBleh : Module {
 			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %s", SETTING_LABELS[which], SCALE_NAMES[value]);
 		else if (which == 2)
 			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %s", SETTING_LABELS[which], CHORDS[value].name);
+		else if (which == 5 && value < 0)
+			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %s", SETTING_LABELS[which], DIVISIONS[-1 - value].name);
 		else if (which == 5)
 			std::snprintf(dispSettingText, sizeof(dispSettingText), "%s: %d ms", SETTING_LABELS[which], value);
 		else
@@ -200,10 +232,26 @@ struct ChordonBleh : Module {
 			strumMs += inputs[STRUM_INPUT].getVoltage() * 50.f;
 		strumMs = clamp(strumMs, 0.f, 500.f);
 		float strumDelay = strumMs / 1000.f;
+		int division = divisionIndex(strumMs);
+		bool clocked = inputs[CLOCK_INPUT].isConnected();
+		if (clocked) {
+			// With a clock the knob picks a note value. The tempo is the time between the last two pulses, kept when the clock stops.
+			if (clockTrigger.process(inputs[CLOCK_INPUT].getVoltage(), 0.1f, 2.f)) {
+				if (clockSeen && clockTime >= 0.005f && clockTime <= 4.f)
+					clockPeriod = clockTime;
+				clockSeen = true;
+				clockTime = 0.f;
+			}
+			clockTime = std::min(clockTime + args.sampleTime, 10.f);
+			strumDelay = strumDelaySeconds(division, clockPeriod, CLOCK_PULSES[clockPulse].quarters);
+		}
+		else {
+			clockSeen = false;
+		}
 		bool gate = !inputs[GATE_INPUT].isConnected() || inputs[GATE_INPUT].getVoltage() >= 1.f;
 
 		// A changed setting is shown until the next note, but for at least 2 seconds
-		int settings[6] = {tonic, key, state[3], state[4], octave, (int) std::round(strumMs)};
+		int settings[6] = {tonic, key, state[3], state[4], octave, clocked ? -1 - division : (int) std::round(strumMs)};
 		bool noteEvent = (gate && !lastGate) || keyNote.semitone != lastState[0];
 		if (gate && !lastGate) {
 			strumTime = 0.f;
@@ -295,11 +343,43 @@ struct ChordDisplay : TransparentWidget {
 };
 
 
+// While a clock is patched the strum knob handles its own drag: the distance dragged is added up and moves one division
+// per DRAG_PIXELS, however fast the mouse moves. Rack's drag adds each mouse event to the already snapped value instead,
+// so slow movements are lost and fast ones overshoot.
+struct ChordonBlehKnob : RoundSmallBlackKnob {
+	static constexpr float DRAG_PIXELS = 20.f;
+	float dragPosition = 0.f;	// in divisions
+
+	ChordonBleh::StrumQuantity* clockedStrum() {
+		ChordonBleh::StrumQuantity* strum = dynamic_cast<ChordonBleh::StrumQuantity*>(getParamQuantity());
+		return strum && strum->clocked() ? strum : NULL;
+	}
+
+	void onDragStart(const DragStartEvent& e) override {
+		ChordonBleh::StrumQuantity* strum = clockedStrum();
+		if (strum)
+			dragPosition = divisionIndex(strum->getValue());
+		RoundSmallBlackKnob::onDragStart(e);
+	}
+
+	void onDragMove(const DragMoveEvent& e) override {
+		ChordonBleh::StrumQuantity* strum = clockedStrum();
+		if (!strum) {
+			RoundSmallBlackKnob::onDragMove(e);
+			return;
+		}
+		dragPosition = clamp(dragPosition - e.mouseDelta.y / DRAG_PIXELS, 0.f, (float) (NUM_DIVISIONS - 1));
+		strum->setValue(divisionValue((int) std::round(dragPosition)));
+	}
+};
+
+
 struct ChordonBlehWidget : ModuleWidget {
-	void addLabel(Vec posMm, const std::string& text, float fontSize = 8.f) {
+	void addLabel(Vec posMm, const std::string& text, float fontSize = 8.f, NVGcolor color = nvgRGB(0xd8, 0xd8, 0xe0)) {
 		PanelLabel* label = new PanelLabel;
 		label->text = text;
 		label->fontSize = fontSize;
+		label->color = color;
 		label->box.pos = mm2px(posMm);
 		addChild(label);
 	}
@@ -314,18 +394,26 @@ struct ChordonBlehWidget : ModuleWidget {
 			[=]() { return (size_t) module->strumMode; },
 			[=](size_t mode) { module->strumMode = (int) mode; }
 		));
+		std::vector<std::string> pulseNames;
+		for (const Division& d : CLOCK_PULSES)
+			pulseNames.push_back(d.name);
+		menu->addChild(createIndexSubmenuItem("Clock pulse length",
+			pulseNames,
+			[=]() { return (size_t) module->clockPulse; },
+			[=](size_t pulse) { module->clockPulse = (int) pulse; }
+		));
 	}
 
 	ChordonBlehWidget(ChordonBleh* module) {
 		setModule(module);
 		setPanel(createPanel(asset::plugin(pluginInstance, "res/ChordonBleh.svg")));
 
-		addLabel(Vec(25.4f, 5.f), "CHORDONBLEH", 10.f);
+		addLabel(Vec(30.48f, 5.f), "CHORDONBLEH", 10.f);
 
 		ChordDisplay* display = new ChordDisplay;
 		display->module = module;
 		display->box.pos = mm2px(Vec(5.08f, 10.f));
-		display->box.size = mm2px(Vec(40.64f, 12.f));
+		display->box.size = mm2px(Vec(50.8f, 12.f));
 		addChild(display);
 
 		struct Row {
@@ -343,22 +431,22 @@ struct ChordonBlehWidget : ModuleWidget {
 		};
 		float y = 32.f;
 		for (const Row& row : rows) {
-			addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(12.7f, y)), module, row.param));
-			addInput(createInputCentered<PJ301MPort>(mm2px(Vec(38.1f, y)), module, row.input));
-			addLabel(Vec(25.4f, y), row.label);
+			addParam(createParamCentered<ChordonBlehKnob>(mm2px(Vec(12.7f, y)), module, row.param));
+			addInput(createInputCentered<PJ301MPort>(mm2px(Vec(48.26f, y)), module, row.input));
+			addLabel(Vec(30.48f, y), row.label);
 			y += 12.5f;
 		}
 
 		const float portY = 111.f;
-		addLabel(Vec(6.35f, 104.5f), "NOTE", 6.5f);
-		addLabel(Vec(19.05f, 104.5f), "GATE IN", 6.5f);
-		addLabel(Vec(31.75f, 104.5f), "CHORD", 6.5f);
-		addLabel(Vec(44.45f, 104.5f), "GATE OUT", 6.5f);
-		addLabel(Vec(25.4f, 123.5f), "goblin mode", 8.f);
+		const char* const portLabels[5] = {"NOTE", "GATE IN", "CLOCK", "CHORD", "GATE OUT"};
+		for (int i = 0; i < 5; i++)
+			addLabel(Vec(6.35f + i * 12.065f, 104.5f), portLabels[i], 6.5f, i < 3 ? nvgRGB(0xd8, 0xd8, 0xe0) : nvgRGB(0x26, 0x26, 0x2e));
+		addLabel(Vec(30.48f, 123.5f), "goblin mode", 8.f);
 		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(6.35f, portY)), module, ChordonBleh::NOTE_INPUT));
-		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(19.05f, portY)), module, ChordonBleh::GATE_INPUT));
-		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(31.75f, portY)), module, ChordonBleh::CHORD_OUTPUT));
-		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(44.45f, portY)), module, ChordonBleh::GATE_OUTPUT));
+		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(18.415f, portY)), module, ChordonBleh::GATE_INPUT));
+		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(30.48f, portY)), module, ChordonBleh::CLOCK_INPUT));
+		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(42.545f, portY)), module, ChordonBleh::CHORD_OUTPUT));
+		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(54.61f, portY)), module, ChordonBleh::GATE_OUTPUT));
 	}
 };
 
